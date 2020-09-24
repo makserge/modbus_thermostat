@@ -36,7 +36,7 @@ enum
 
 #define MAX_TEMPERATURE 28  
 #define MIN_TEMPERATURE 18
-enum { PM_MAIN, PM_OPTION, PM_CLEANING };  // Program modes
+enum { PM_MAIN, PM_OPTION };  // Program modes
 enum { BOOT, COOLING, TEMP_OK, HEATING };  // Thermostat modes
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
@@ -50,7 +50,6 @@ uint8_t setTemperature = 20;
 uint8_t mode = PM_MAIN;         // program mode
 uint8_t modbusId = DEFAULT_ID;  // ID / address for modbus
 bool touchPressed = false;
-uint8_t timerCleaning = 0;
  
 unsigned int holdingRegs[TOTAL_REGS_SIZE]; // function 3 and 16 register array 
  
@@ -102,31 +101,12 @@ void loop() {
     digitalWrite(TFT_LED, LOW); // Backlight on
   }
 
-  cleaningProcessing();
-  
   modbusProcessing(); 
   delay(100); 
 }
 
 bool touchEvent() {
   return false;  
-}
-
-void cleaningProcessing() {
-  // idle timer for screen cleaning
-  if (mode == PM_CLEANING) {
-    if ((timerCleaning % 10) == 0) {
-      tft.fillRect(0, 0, 100, 60, ILI9341_BLACK);
-      tft.setCursor(10, 50);
-      tft.print(timerCleaning / 10);
-    }
-    if (timerCleaning) {
-      timerCleaning--;
-    } else {
-      drawOptionScreen();
-      mode = PM_OPTION;
-    }
-  }  
 }
 
 void modbusProcessing() {
@@ -155,7 +135,7 @@ void modbusProcessing() {
 
 void detectButtons() {
   // in main program
-  if (mode == PM_MAIN){
+  if (mode == PM_MAIN) {
    // button UP
    if ((X > 190) && (Y < 50)) {
     if (setTemperature < MAX_TEMPERATURE) setTemperature++;
@@ -186,14 +166,6 @@ void detectButtons() {
     if (modbusId < 255) modbusId++;
     updateModbusAddr();
    }
-   // button screen cleaning
-   if ((Y > 85) && (Y < 155)) {
-     tft.fillScreen(ILI9341_BLACK);
-     tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
-     tft.setFont(&FreeSansBold24pt7b);  
-     mode = PM_CLEANING;    
-     timerCleaning = 255;
-   }
    // button OK
    if (Y > 265) {
      thermostatMode = BOOT;
@@ -217,27 +189,8 @@ void drawOptionScreen() {
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.setFont(&FreeSansBold9pt7b);  
   
-  // Modbus Address adjustment
-  tft.setCursor(10, 20);
+  tft.setCursor(50, 120);
   tft.print("MODBUS address");
-  tft.setFont(&FreeSansBold24pt7b);
-  tft.setCursor(30, 65);
-  tft.print("-");
-  tft.setCursor(190, 65);
-  tft.print("+");
-  tft.drawLine(5, 80, 235, 80, ILI9341_WHITE);
-
-  // Screen cleaning idle timer
-  tft.setFont(&FreeSansBold12pt7b);  
-  tft.setCursor(26, 130);
-  tft.print("Screen cleaning");
-  tft.drawLine(5, 160, 235, 160, ILI9341_WHITE);
-
-  // OK Button
-  tft.setFont(&FreeSansBold24pt7b);
-  tft.drawLine(5, 260, 235, 260, ILI9341_WHITE);
-  tft.setCursor(90, 310);
-  tft.print("OK");
   
   updateModbusAddr();
 }
@@ -291,10 +244,10 @@ void updateCircleColor() {
 }
 
 void updateModbusAddr() {
-  tft.fillRect(110, 30, 60, 45, ILI9341_BLACK);
+  tft.fillRect(230, 100, 60, 45, ILI9341_BLACK);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.setFont(&FreeSansBold24pt7b);
-  tft.setCursor(115, 65);
+  tft.setCursor(235, 130);
   tft.print(modbusId);
 }
 
