@@ -78,6 +78,7 @@ void setup() {
   digitalWrite(TFT_LED, HIGH);    // HIGH to Turn on;
 
   tft.begin();
+  tft.setRotation(1);
 
   drawMainScreen();
 }
@@ -115,7 +116,7 @@ void cleaningProcessing() {
   // idle timer for screen cleaning
   if (mode == PM_CLEANING) {
     if ((timerCleaning % 10) == 0) {
-      tft.fillRect(0,0, 100, 60, ILI9341_BLACK);
+      tft.fillRect(0, 0, 100, 60, ILI9341_BLACK);
       tft.setCursor(10, 50);
       tft.print(timerCleaning / 10);
     }
@@ -156,37 +157,37 @@ void detectButtons() {
   // in main program
   if (mode == PM_MAIN){
    // button UP
-   if ((X>190) && (Y<50)) {
+   if ((X > 190) && (Y < 50)) {
     if (setTemperature < MAX_TEMPERATURE) setTemperature++;
     holdingRegs[SET_TEMP] = setTemperature;
     updateSetTemp();
     updateCircleColor();
    }
    // button DWN
-   if ((X>190) && (Y>200 && Y<250)) {
+   if ((X > 190) && (Y > 200 && Y < 250)) {
     if (setTemperature > MIN_TEMPERATURE) setTemperature--;
     holdingRegs[SET_TEMP] = setTemperature;
     updateSetTemp();
     updateCircleColor();
    }
    // button gearwheel
-   if ((X<60) && (Y<50)) {
+   if ((X < 60) && (Y < 50)) {
     drawOptionScreen();
     mode = PM_OPTION;
    }
   } else if (mode == PM_OPTION){ 
    // button -
-   if ((X<110) && (Y<75)) {
+   if ((X < 110) && (Y < 75)) {
     if (modbusId > 0) modbusId--;
     updateModbusAddr();
    }
    // button +
-   if ((X>130) && (Y<75)) {
+   if ((X > 130) && (Y < 75)) {
     if (modbusId < 255) modbusId++;
     updateModbusAddr();
    }
    // button screen cleaning
-   if ((Y>85) && (Y<155)) {
+   if ((Y > 85) && (Y < 155)) {
      tft.fillScreen(ILI9341_BLACK);
      tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
      tft.setFont(&FreeSansBold24pt7b);  
@@ -194,7 +195,7 @@ void detectButtons() {
      timerCleaning = 255;
    }
    // button OK
-   if (Y>265) {
+   if (Y > 265) {
      thermostatMode = BOOT;
      drawMainScreen();
      modbus_configure(BAUDRATE, modbusId, 0, TOTAL_REGS_SIZE, 0);      
@@ -224,17 +225,17 @@ void drawOptionScreen() {
   tft.print("-");
   tft.setCursor(190, 65);
   tft.print("+");
-  tft.drawLine(5,80,235,80, ILI9341_WHITE);
+  tft.drawLine(5, 80, 235, 80, ILI9341_WHITE);
 
   // Screen cleaning idle timer
   tft.setFont(&FreeSansBold12pt7b);  
   tft.setCursor(26, 130);
   tft.print("Screen cleaning");
-  tft.drawLine(5,160,235,160, ILI9341_WHITE);
+  tft.drawLine(5, 160, 235, 160, ILI9341_WHITE);
 
   // OK Button
   tft.setFont(&FreeSansBold24pt7b);
-  tft.drawLine(5,260,235,260, ILI9341_WHITE);
+  tft.drawLine(5, 260, 235, 260, ILI9341_WHITE);
   tft.setCursor(90, 310);
   tft.print("OK");
   
@@ -248,11 +249,11 @@ void updateSetTemp() {
   int strLen =  curValue.length() + 1; 
   char charArray[strLen];
   curValue.toCharArray(charArray, strLen);
-  tft.fillRect(70, 96, 60, 50, ILI9341_BLACK);
+  tft.fillRect(120, 81, 60, 50, ILI9341_BLACK);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.setFont(&FreeSansBold24pt7b);
   tft.getTextBounds(charArray, 80, 130, &x1, &y1, &w, &h);
-  tft.setCursor(123 - w, 130);
+  tft.setCursor(168 - w, 115);
   tft.print(charArray);
 }
 
@@ -263,11 +264,11 @@ void updateRoomTemp() {
   int strLen =  curValue.length() + 1; 
   char charArray[strLen];
   curValue.toCharArray(charArray, strLen);
-  tft.fillRect(36, 200, 30, 21, ILI9341_ULTRA_DARKGREY);
+  tft.fillRect(86, 185, 30, 21, ILI9341_ULTRA_DARKGREY);
   tft.setTextColor(ILI9341_WHITE, ILI9341_ULTRA_DARKGREY);
   tft.setFont(&FreeSansBold12pt7b);
-  tft.getTextBounds(charArray, 40, 220, &x1, &y1, &w, &h);
-  tft.setCursor(61 - w, 220);
+  tft.getTextBounds(charArray, 90, 205, &x1, &y1, &w, &h);
+  tft.setCursor(106 - w, 205);
   tft.print(charArray);
 }
 
@@ -298,46 +299,35 @@ void updateModbusAddr() {
 }
 
 void drawCircles() {
-  //draw big circle 
-  unsigned char i;
+  uint16_t color;
   if (roomTemperature < setTemperature) {
-    // heating - red
-    for (i = 0; i < 10; i++) {
-      tft.drawCircle(120, 120, 80 + i, ILI9341_RED);
-    }
+    color = ILI9341_RED; //heating
   } else if (roomTemperature > setTemperature) {
-    // cooling - blue
-    for (i = 0; i < 10; i++) {
-      tft.drawCircle(120, 120, 80 + i, ILI9341_BLUE);    
-    }
+    color = ILI9341_BLUE; //cooling    
   } else {
-    // Temperature ok
-    for (i = 0; i < 10; i++) {
-      tft.drawCircle(120, 120, 80 + i, ILI9341_GREEN);       
-    }
+    color = ILI9341_GREEN; // Temperature ok
   }
+  for (uint8_t i = 0; i < 10; i++) {
+    tft.drawCircle(170, 105, 80 + i, color);
+  }
+  tft.fillCircle(110, 185, 40, ILI9341_ULTRA_DARKGREY);
 
-  //draw small 
-  tft.fillCircle(60, 200, 40, ILI9341_ULTRA_DARKGREY);
-
-  //draw °C in big circle
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.setFont(&FreeSansBold9pt7b);
-  tft.setCursor(130, 100);
+  tft.setCursor(180, 85);
   tft.print("o");
   tft.setFont(&FreeSansBold24pt7b);
-  tft.setCursor(140, 130);
+  tft.setCursor(190, 115);
   tft.print("C");
 
-  // draw room and °C in small circle
   tft.setTextColor(ILI9341_WHITE, ILI9341_ULTRA_DARKGREY);
   tft.setFont(&FreeSansBold12pt7b);
-  tft.setCursor(75, 220);
+  tft.setCursor(125, 205);
   tft.print("C");
-  tft.drawCircle(69,204, 2, ILI9341_WHITE);
-  tft.drawCircle(69,204, 3, ILI9341_WHITE);
+  tft.drawCircle(119, 189, 2, ILI9341_WHITE);
+  tft.drawCircle(119, 189, 3, ILI9341_WHITE);
   tft.setFont(&FreeSansBold9pt7b);
-  tft.setCursor(35, 190);
+  tft.setCursor(85, 175);
   tft.print("Room");
   updateRoomTemp();
 }
