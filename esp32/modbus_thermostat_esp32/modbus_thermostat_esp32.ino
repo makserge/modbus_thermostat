@@ -8,6 +8,11 @@
 #include "Fonts/FreeSansBold24pt7b.h"
 #include "SimpleModbusSlave.h"
 #include "usergraphics.h"
+#include "Bounce2.h"
+
+#define MODE_BUTTON T4//13
+#define UP_BUTTON   T5//12
+#define DOWN_BUTTON T6//14
 
 #define TFT_CS   5
 #define TFT_DC   25//4
@@ -16,6 +21,8 @@
 #define TFT_RST  17//22
 #define TFT_MISO 19
 #define TFT_LED  2//15  
+
+#define DEBOUNCE_INTERVAL 25 //in ms
 
 #define ILI9341_ULTRA_DARKGREY 0x632C      
 
@@ -36,20 +43,21 @@ enum
 
 #define MAX_TEMPERATURE 28  
 #define MIN_TEMPERATURE 18
-enum { PM_MAIN, PM_OPTION };  // Program modes
+enum { MODE_MAIN, MODE_SETTINGS };
 enum { BOOT, COOLING, TEMP_OK, HEATING };  // Thermostat modes
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
+Bounce modeButton = Bounce();
+Bounce upButton = Bounce();
+Bounce downButton = Bounce();
 
-int X,Y;
 uint8_t thermostatMode = BOOT;
  
 uint8_t roomTemperature = 21;
 uint8_t setTemperature = 20;
 
-uint8_t mode = PM_MAIN;         // program mode
+uint8_t mode = MODE_MAIN;
 uint8_t modbusId = DEFAULT_ID;  // ID / address for modbus
-bool touchPressed = false;
  
 unsigned int holdingRegs[TOTAL_REGS_SIZE]; // function 3 and 16 register array 
  
@@ -58,7 +66,6 @@ void setup() {
   holdingRegs[SET_TEMP] = setTemperature;
   holdingRegs[DISP_ONOFF] = 255;
   
-  #ifndef _debug 
   /* parameters(long baudrate, 
                 unsigned char ID, 
                 unsigned char transmit enable pin, 
@@ -71,42 +78,31 @@ void setup() {
      but practically it works with all major modbus master implementations.
   */
   modbus_configure(BAUDRATE, modbusId, 0, TOTAL_REGS_SIZE, 0); 
-  #endif
-
+  
   pinMode(TFT_LED, OUTPUT);
-  digitalWrite(TFT_LED, HIGH);    // HIGH to Turn on;
+  digitalWrite(TFT_LED, HIGH);
 
   tft.begin();
   tft.setRotation(1);
+
+  setupButtons();
 
   drawMainScreen();
 }
 
 void loop() {
-  if (touchEvent()== true) { 
-    if (touchPressed == false) {
-      if (holdingRegs[DISP_ONOFF]) detectButtons();
-      holdingRegs[DISP_ONOFF] = 255; // reset BL timer       
-    }
-    touchPressed = true;    
-  } else {
-    touchPressed = false;
-  }
-
+  detectButtons();
+ 
   //automatic display BL timeout
   if (holdingRegs[DISP_ONOFF]) {
     holdingRegs[DISP_ONOFF]--;
-    digitalWrite(TFT_LED, HIGH); // Backlight off 
+    digitalWrite(TFT_LED, HIGH);
   } else {
-    digitalWrite(TFT_LED, LOW); // Backlight on
+    digitalWrite(TFT_LED, LOW);
   }
 
   modbusProcessing(); 
   delay(100); 
-}
-
-bool touchEvent() {
-  return false;  
 }
 
 void modbusProcessing() {
@@ -133,46 +129,65 @@ void modbusProcessing() {
   }
 }
 
+void setupButtons() {
+  modeButton.attach(MODE_BUTTON);
+  modeButton.interval(DEBOUNCE_INTERVAL);
+
+  upButton.attach(UP_BUTTON);
+  upButton.interval(DEBOUNCE_INTERVAL);
+
+  downButton.attach(DOWN_BUTTON);
+  downButton.interval(DEBOUNCE_INTERVAL);
+}
+
 void detectButtons() {
-  // in main program
-  if (mode == PM_MAIN) {
-   // button UP
-   if ((X > 190) && (Y < 50)) {
-    if (setTemperature < MAX_TEMPERATURE) setTemperature++;
-    holdingRegs[SET_TEMP] = setTemperature;
-    updateSetTemp();
-    updateCircleColor();
-   }
-   // button DWN
-   if ((X > 190) && (Y > 200 && Y < 250)) {
-    if (setTemperature > MIN_TEMPERATURE) setTemperature--;
-    holdingRegs[SET_TEMP] = setTemperature;
-    updateSetTemp();
-    updateCircleColor();
-   }
-   // button gearwheel
-   if ((X < 60) && (Y < 50)) {
-    drawOptionScreen();
-    mode = PM_OPTION;
-   }
-  } else if (mode == PM_OPTION){ 
-   // button -
-   if ((X < 110) && (Y < 75)) {
-    if (modbusId > 0) modbusId--;
-    updateModbusAddr();
-   }
-   // button +
-   if ((X > 130) && (Y < 75)) {
-    if (modbusId < 255) modbusId++;
-    updateModbusAddr();
-   }
-   // button OK
-   if (Y > 265) {
-     thermostatMode = BOOT;
-     drawMainScreen();
-     modbus_configure(BAUDRATE, modbusId, 0, TOTAL_REGS_SIZE, 0);      
-     mode = PM_MAIN;    
-   }
+  modeButton.update();
+  upButton.update();
+  downButton.update();
+
+  if (modeButton.changed() && modeButton.read()) {
+    holdingRegs[DISP_ONOFF] = 255;
+    
+    if (mode == MODE_MAIN) {
+      mode = MODE_SETTINGS;
+      drawOptionScreen();
+    } else {
+      modbus_configure(BAUDRATE, modbusId, 0, TOTAL_REGS_SIZE, 0);
+      thermostatMode = BOOT;
+      mode = MODE_MAIN; 
+      drawMainScreen(); 
+    }
+  }
+  if (mode == MODE_MAIN) {
+    if (upButton.changed() && upButton.read()) {
+      holdingRegs[DISP_ONOFF] = 255;
+      
+      if (setTemperature < MAX_TEMPERATURE) setTemperature++;
+      holdingRegs[SET_TEMP] = setTemperature;
+      updateSetTemp();
+      updateCircleColor();
+    }
+    if (downButton.changed() && downButton.read()) {
+      holdingRegs[DISP_ONOFF] = 255;
+      
+      if (setTemperature > MIN_TEMPERATURE) setTemperature--;
+      holdingRegs[SET_TEMP] = setTemperature;
+      updateSetTemp();
+      updateCircleColor();
+    }
+  } else {
+    if (upButton.changed() && upButton.read()) {
+      holdingRegs[DISP_ONOFF] = 255;
+      
+      if (modbusId < 255) modbusId++;
+      updateModbusAddr();
+    } 
+    if (downButton.changed() && downButton.read()) {
+      holdingRegs[DISP_ONOFF] = 255;
+      
+      if (modbusId > 1) modbusId--;
+      updateModbusAddr();
+    }
   }
 }
 
