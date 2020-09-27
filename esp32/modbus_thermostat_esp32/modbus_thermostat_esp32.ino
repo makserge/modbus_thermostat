@@ -1,5 +1,8 @@
 #include <Arduino.h>
 #include <SPI.h>
+#include <EEPROM.h>
+#include <esp_task_wdt.h>
+
 #include "Adafruit_GFX.h"
 #include "Adafruit_ILI9341.h"
 #include "Fonts/FreeSans9pt7b.h"
@@ -10,6 +13,7 @@
 #include "usergraphics.h"
 #include "Bounce2.h"
 
+#define POWER_BUTTON T7//27
 #define MODE_BUTTON T4//13
 #define UP_BUTTON   T5//12
 #define DOWN_BUTTON T6//14
@@ -24,6 +28,12 @@
 
 #define DEBOUNCE_INTERVAL 25 //in ms
 
+#define EEPROM_SIZE 2
+#define EEPROM_TEMP 0
+#define EEPROM_MODBUS_ID 1
+
+#define WDT_TIMEOUT 5
+
 #define ILI9341_ULTRA_DARKGREY 0x632C      
 
 #define BAUDRATE 9600
@@ -32,6 +42,7 @@ enum
 {     
   // just add or remove registers 
   // The first register starts at address 0
+  POWER_ONOFF,
   ROOM_TEMP,  // measured room temp from external sensor
   SET_TEMP,   // set-point temperature by user, 
   DISP_ONOFF, // timer for display automatic off function (0 switch backlight off, >0 set timer for automatic off)
@@ -47,6 +58,7 @@ enum { MODE_MAIN, MODE_SETTINGS };
 enum { BOOT, COOLING, TEMP_OK, HEATING };  // Thermostat modes
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
+Bounce powerButton = Bounce();
 Bounce modeButton = Bounce();
 Bounce upButton = Bounce();
 Bounce downButton = Bounce();
@@ -62,6 +74,8 @@ uint8_t modbusId = DEFAULT_ID;  // ID / address for modbus
 unsigned int holdingRegs[TOTAL_REGS_SIZE]; // function 3 and 16 register array 
  
 void setup() {
+  setupEEPROM();
+  holdingRegs[DISP_ONOFF] = 0;
   holdingRegs[ROOM_TEMP] = roomTemperature;
   holdingRegs[SET_TEMP] = setTemperature;
   holdingRegs[DISP_ONOFF] = 255;
@@ -86,7 +100,8 @@ void setup() {
   tft.setRotation(1);
 
   setupButtons();
-
+  setupWDT();
+  
   drawMainScreen();
 }
 
@@ -101,8 +116,9 @@ void loop() {
     digitalWrite(TFT_LED, LOW);
   }
 
-  modbusProcessing(); 
-  delay(100); 
+  modbusProcessing();
+  delay(100);
+  esp_task_wdt_reset();
 }
 
 void modbusProcessing() {
@@ -129,7 +145,20 @@ void modbusProcessing() {
   }
 }
 
+void setupEEPROM() {
+  EEPROM.begin(EEPROM_SIZE);
+  if (EEPROM.read(EEPROM_TEMP) != 255) {
+    setTemperature = EEPROM.read(EEPROM_TEMP);
+  }
+  if (EEPROM.read(EEPROM_MODBUS_ID) != 255) {
+    modbusId = EEPROM.read(EEPROM_MODBUS_ID);
+  }
+}
+
 void setupButtons() {
+  powerButton.attach(POWER_BUTTON);
+  powerButton.interval(DEBOUNCE_INTERVAL);
+  
   modeButton.attach(MODE_BUTTON);
   modeButton.interval(DEBOUNCE_INTERVAL);
 
@@ -140,12 +169,29 @@ void setupButtons() {
   downButton.interval(DEBOUNCE_INTERVAL);
 }
 
+void setupWDT() {
+  esp_task_wdt_init(WDT_TIMEOUT, true);
+  esp_task_wdt_add(NULL);
+}
+
 void detectButtons() {
+  powerButton.update();
   modeButton.update();
   upButton.update();
   downButton.update();
 
-  if (modeButton.changed() && modeButton.read()) {
+  if (powerButton.changed() && powerButton.read()) {
+    if (holdingRegs[POWER_ONOFF] == 1) {
+      holdingRegs[POWER_ONOFF] = 0;
+      drawPowerOffScreen();
+    } else {
+      holdingRegs[POWER_ONOFF] = 1;
+      thermostatMode = BOOT;
+      mode = MODE_MAIN;
+      drawMainScreen();
+    }
+  }
+  else if (modeButton.changed() && modeButton.read()) {
     holdingRegs[DISP_ONOFF] = 255;
     
     if (mode == MODE_MAIN) {
@@ -164,14 +210,15 @@ void detectButtons() {
       
       if (setTemperature < MAX_TEMPERATURE) setTemperature++;
       holdingRegs[SET_TEMP] = setTemperature;
+      saveEEPROM(EEPROM_TEMP, setTemperature);
       updateSetTemp();
       updateCircleColor();
-    }
-    if (downButton.changed() && downButton.read()) {
+    } else if (downButton.changed() && downButton.read()) {
       holdingRegs[DISP_ONOFF] = 255;
       
       if (setTemperature > MIN_TEMPERATURE) setTemperature--;
       holdingRegs[SET_TEMP] = setTemperature;
+      saveEEPROM(EEPROM_TEMP, setTemperature);
       updateSetTemp();
       updateCircleColor();
     }
@@ -180,15 +227,21 @@ void detectButtons() {
       holdingRegs[DISP_ONOFF] = 255;
       
       if (modbusId < 255) modbusId++;
+      saveEEPROM(EEPROM_MODBUS_ID, modbusId);
       updateModbusAddr();
-    } 
-    if (downButton.changed() && downButton.read()) {
+    } else if (downButton.changed() && downButton.read()) {
       holdingRegs[DISP_ONOFF] = 255;
       
       if (modbusId > 1) modbusId--;
+      saveEEPROM(EEPROM_MODBUS_ID, modbusId);
       updateModbusAddr();
     }
   }
+}
+
+void saveEEPROM(int address, int value) {
+  EEPROM.write(address, value);
+  EEPROM.commit();
 }
 
 void drawMainScreen() {
@@ -196,6 +249,16 @@ void drawMainScreen() {
   
   updateCircleColor();
   updateSetTemp();
+}
+
+void drawPowerOffScreen() {
+  tft.fillScreen(ILI9341_BLACK);
+
+  tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
+  tft.setFont(&FreeSansBold9pt7b);  
+  
+  tft.setCursor(50, 120);
+  tft.print("Power off");
 }
 
 void drawOptionScreen() {
