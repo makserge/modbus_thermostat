@@ -9,7 +9,6 @@
 #include "Fonts/FreeSansBold9pt7b.h"
 #include "Fonts/FreeSansBold12pt7b.h"
 #include "Fonts/FreeSansBold24pt7b.h"
-#include "SimpleModbusSlave.h"
 #include "usergraphics.h"
 #include "Bounce2.h"
 
@@ -36,32 +35,30 @@
 
 #define ILI9341_ULTRA_DARKGREY 0x632C      
 
-#define BAUDRATE 9600
 #define DEFAULT_ID 1
-enum 
-{     
-  // just add or remove registers 
-  // The first register starts at address 0
-  POWER_ONOFF,
-  ROOM_TEMP,  // measured room temp from external sensor
-  SET_TEMP,   // set-point temperature by user, 
-  DISP_ONOFF, // timer for display automatic off function (0 switch backlight off, >0 set timer for automatic off)
-  TOTAL_ERRORS,
-  // leave this one
-  TOTAL_REGS_SIZE 
-  // total number of registers for function 3 and 16 share the same register array
-}; 
 
-#define MAX_TEMPERATURE 28  
 #define MIN_TEMPERATURE 18
-enum { MODE_MAIN, MODE_SETTINGS };
-enum { BOOT, COOLING, TEMP_OK, HEATING };  // Thermostat modes
+#define MAX_TEMPERATURE 28
 
-Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
-Bounce powerButton = Bounce();
-Bounce modeButton = Bounce();
-Bounce upButton = Bounce();
-Bounce downButton = Bounce();
+enum { MODE_MAIN, MODE_SETTINGS };
+enum { BOOT, COOLING, TEMP_OK, HEATING };
+
+const uint8_t SERIAL_STATUS = 1;
+const uint8_t SERIAL_UPDATE = 2;
+const uint8_t SERIAL_ROOM_TEMP = 3;
+
+#define SERIAL_BAUDRATE 9600
+const uint8_t SERIAL_BUFFER_LENGTH = 15;
+char inSerialChar;
+uint8_t serialBufferPos;
+char *serialToken;
+char serialBuffer[SERIAL_BUFFER_LENGTH];
+char serialDelim[2];
+char *serialLast;
+
+const char *SERIAL_SEND_POWER = "1~%d";
+const char *SERIAL_SEND_TEMP = "2~%d";
+const char *SERIAL_SEND_MODBUS = "3~%d";
 
 uint8_t thermostatMode = BOOT;
  
@@ -71,28 +68,20 @@ uint8_t setTemperature = 20;
 uint8_t mode = MODE_MAIN;
 uint8_t modbusId = DEFAULT_ID;  // ID / address for modbus
  
-unsigned int holdingRegs[TOTAL_REGS_SIZE]; // function 3 and 16 register array 
+uint8_t power = 0;
+
+#define DISPLAY_TIMER_TIMEOUT 255
+uint8_t displayTimer = 0;
+
+Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
+Bounce powerButton = Bounce();
+Bounce modeButton = Bounce();
+Bounce upButton = Bounce();
+Bounce downButton = Bounce();
  
 void setup() {
   setupEEPROM();
-  holdingRegs[DISP_ONOFF] = 0;
-  holdingRegs[ROOM_TEMP] = roomTemperature;
-  holdingRegs[SET_TEMP] = setTemperature;
-  holdingRegs[DISP_ONOFF] = 255;
-  
-  /* parameters(long baudrate, 
-                unsigned char ID, 
-                unsigned char transmit enable pin, 
-                unsigned int holding registers size,
-                unsigned char low latency)
-                
-     The transmit enable pin is used in half duplex communication to activate a MAX485 or similar
-     to deactivate this mode use any value < 2 because 0 & 1 is reserved for Rx & Tx.
-     Low latency delays makes the implementation non-standard
-     but practically it works with all major modbus master implementations.
-  */
-  modbus_configure(BAUDRATE, modbusId, 0, TOTAL_REGS_SIZE, 0); 
-  
+   
   pinMode(TFT_LED, OUTPUT);
   digitalWrite(TFT_LED, HIGH);
 
@@ -101,47 +90,29 @@ void setup() {
 
   setupButtons();
   setupWDT();
-  
+  setupSerialCommand();
   drawMainScreen();
+  resetDisplayTimer();
 }
 
 void loop() {
   detectButtons();
- 
-  //automatic display BL timeout
-  if (holdingRegs[DISP_ONOFF]) {
-    holdingRegs[DISP_ONOFF]--;
-    digitalWrite(TFT_LED, HIGH);
-  } else {
-    digitalWrite(TFT_LED, LOW);
-  }
-
-  modbusProcessing();
+  readSerial();
+  checkDisplayTimer();
   delay(100);
   esp_task_wdt_reset();
 }
 
-void modbusProcessing() {
-  holdingRegs[TOTAL_ERRORS] = modbus_update(holdingRegs); 
+void resetDisplayTimer() {
+  displayTimer = DISPLAY_TIMER_TIMEOUT;
+}
 
-  // update of variables by Modbus
-  if (holdingRegs[ROOM_TEMP] != roomTemperature) {
-     if ((holdingRegs[ROOM_TEMP] > 50) || (holdingRegs[ROOM_TEMP] < 5)) {
-       holdingRegs[ROOM_TEMP] = roomTemperature;
-     } else {
-       roomTemperature = holdingRegs[ROOM_TEMP];
-       updateRoomTemp();
-       updateCircleColor();
-     }
-  }
-  if (holdingRegs[SET_TEMP] != setTemperature) {
-     if ((holdingRegs[SET_TEMP] > MAX_TEMPERATURE) || (holdingRegs[SET_TEMP] < MIN_TEMPERATURE)) {
-       holdingRegs[SET_TEMP] = setTemperature;
-     } else {
-       setTemperature = holdingRegs[SET_TEMP];
-       updateSetTemp();
-       updateCircleColor();
-     }
+void checkDisplayTimer() {
+  if (displayTimer) {
+    displayTimer--;
+    digitalWrite(TFT_LED, HIGH);
+  } else {
+    digitalWrite(TFT_LED, LOW);
   }
 }
 
@@ -181,58 +152,69 @@ void detectButtons() {
   downButton.update();
 
   if (powerButton.changed() && powerButton.read()) {
-    if (holdingRegs[POWER_ONOFF] == 1) {
-      holdingRegs[POWER_ONOFF] = 0;
+    resetDisplayTimer();
+    
+    if (power == 1) {
+      power = 0;
       drawPowerOffScreen();
     } else {
-      holdingRegs[POWER_ONOFF] = 1;
+      power = 1;
       thermostatMode = BOOT;
       mode = MODE_MAIN;
       drawMainScreen();
     }
+    sendSerial(SERIAL_SEND_POWER, power);
   }
   else if (modeButton.changed() && modeButton.read()) {
-    holdingRegs[DISP_ONOFF] = 255;
+    resetDisplayTimer();
     
     if (mode == MODE_MAIN) {
       mode = MODE_SETTINGS;
       drawOptionScreen();
     } else {
-      modbus_configure(BAUDRATE, modbusId, 0, TOTAL_REGS_SIZE, 0);
       thermostatMode = BOOT;
       mode = MODE_MAIN; 
-      drawMainScreen(); 
+      drawMainScreen();
+      sendSerial(SERIAL_SEND_MODBUS, modbusId);
     }
   }
   if (mode == MODE_MAIN) {
     if (upButton.changed() && upButton.read()) {
-      holdingRegs[DISP_ONOFF] = 255;
+      resetDisplayTimer();
       
-      if (setTemperature < MAX_TEMPERATURE) setTemperature++;
-      holdingRegs[SET_TEMP] = setTemperature;
+      if (setTemperature < MAX_TEMPERATURE) {
+        setTemperature++;
+      }
       saveEEPROM(EEPROM_TEMP, setTemperature);
       updateSetTemp();
       updateCircleColor();
+      sendSerial(SERIAL_SEND_TEMP, setTemperature);
     } else if (downButton.changed() && downButton.read()) {
-      holdingRegs[DISP_ONOFF] = 255;
+      resetDisplayTimer();
       
-      if (setTemperature > MIN_TEMPERATURE) setTemperature--;
-      holdingRegs[SET_TEMP] = setTemperature;
+      if (setTemperature > MIN_TEMPERATURE) {
+        setTemperature--;
+      }
       saveEEPROM(EEPROM_TEMP, setTemperature);
       updateSetTemp();
       updateCircleColor();
+      sendSerial(SERIAL_SEND_TEMP, setTemperature);
     }
   } else {
     if (upButton.changed() && upButton.read()) {
-      holdingRegs[DISP_ONOFF] = 255;
+      resetDisplayTimer();
       
-      if (modbusId < 255) modbusId++;
+      if (modbusId < 255) {
+        modbusId++;
+      }
       saveEEPROM(EEPROM_MODBUS_ID, modbusId);
       updateModbusAddr();
     } else if (downButton.changed() && downButton.read()) {
-      holdingRegs[DISP_ONOFF] = 255;
+      resetDisplayTimer();
       
-      if (modbusId > 1) modbusId--;
+      if (modbusId > 1) {
+        modbusId--;
+      }
       saveEEPROM(EEPROM_MODBUS_ID, modbusId);
       updateModbusAddr();
     }
@@ -361,4 +343,102 @@ void drawCircles() {
   tft.setCursor(85, 175);
   tft.print("Room");
   updateRoomTemp();
+}
+
+void setupSerialCommand() {
+  Serial1.begin(SERIAL_BAUDRATE);
+  strncpy(serialDelim, "~", 2);
+  clearSerialBuffer();
+}
+
+void clearSerialBuffer() {
+  for (uint8_t i = 0; i < SERIAL_BUFFER_LENGTH; i++) {
+    serialBuffer[i] = '\0';
+  }
+  serialBufferPos = 0;
+  delay(5);
+}
+
+void readSerial() {
+/*  
+1
+2~0-1~18-28
+3~0-50
+*/ 
+  while (Serial1.available() > 0) {
+    uint8_t serialCommand;
+    inSerialChar = Serial1.read();
+    if (inSerialChar == '\n') {
+      serialBufferPos = 0;
+      serialToken = strtok_r(serialBuffer, serialDelim, &serialLast);
+      if (serialToken == NULL) {
+        return;
+      }
+      serialCommand = atoi(serialToken);
+      switch (serialCommand) {
+        case SERIAL_STATUS:
+          processStatus();
+          break;
+        case SERIAL_UPDATE:
+          processUpdate();
+          break;
+        case SERIAL_ROOM_TEMP:
+          processRoomTemp();
+          break;   
+      }
+      clearSerialBuffer();
+    }
+    serialBuffer[serialBufferPos++] = inSerialChar;
+    serialBuffer[serialBufferPos] = '\0';
+  }  
+}
+
+void processStatus() {
+  sendSerial(SERIAL_SEND_MODBUS, modbusId);
+  sendSerial(SERIAL_SEND_TEMP, setTemperature);
+}
+
+void processUpdate() {
+  int number;
+  char *param;
+
+  param = serialNextParam();
+
+  if (param != NULL) {
+    power = atol(param);
+    if (power == 1) {
+      drawPowerOffScreen();
+    } else {
+      thermostatMode = BOOT;
+      mode = MODE_MAIN;
+      drawMainScreen();
+    }
+
+    param = serialNextParam();
+    if (param != NULL) {
+        setTemperature = atol(param);
+        updateSetTemp();
+        updateCircleColor();
+    }
+  }
+}
+
+void processRoomTemp() {
+  char *param;
+  param = serialNextParam();
+  if (param != NULL) {
+    roomTemperature = atol(param) / 10;
+    updateRoomTemp();
+    updateCircleColor();
+  }
+}
+
+char *serialNextParam() {
+  return strtok_r(NULL, serialDelim, &serialLast);
+}
+
+void sendSerial(const char *command, int value) {
+  char buf[15];
+  sprintf(buf, command, value);
+  Serial1.println(buf);
 }
