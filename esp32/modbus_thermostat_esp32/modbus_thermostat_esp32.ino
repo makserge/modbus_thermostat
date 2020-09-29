@@ -147,9 +147,6 @@ void setupWDT() {
 
 void detectButtons() {
   powerButton.update();
-  modeButton.update();
-  upButton.update();
-  downButton.update();
 
   if (powerButton.changed() && powerButton.read()) {
     resetDisplayTimer();
@@ -165,7 +162,13 @@ void detectButtons() {
     }
     sendSerial(SERIAL_SEND_POWER, power);
   }
-  else if (modeButton.changed() && modeButton.read()) {
+  if (power == 0) {
+    return;
+  }
+  modeButton.update();
+  upButton.update();
+  downButton.update();
+  if (modeButton.changed() && modeButton.read()) {
     resetDisplayTimer();
     
     if (mode == MODE_MAIN) {
@@ -175,7 +178,6 @@ void detectButtons() {
       thermostatMode = BOOT;
       mode = MODE_MAIN; 
       drawMainScreen();
-      sendSerial(SERIAL_SEND_MODBUS, modbusId);
     }
   }
   if (mode == MODE_MAIN) {
@@ -207,16 +209,18 @@ void detectButtons() {
       if (modbusId < 255) {
         modbusId++;
       }
-      saveEEPROM(EEPROM_MODBUS_ID, modbusId);
       updateModbusAddr();
+      saveEEPROM(EEPROM_MODBUS_ID, modbusId);
+      sendSerial(SERIAL_SEND_MODBUS, modbusId);
     } else if (downButton.changed() && downButton.read()) {
       resetDisplayTimer();
       
       if (modbusId > 1) {
         modbusId--;
       }
-      saveEEPROM(EEPROM_MODBUS_ID, modbusId);
       updateModbusAddr();
+      saveEEPROM(EEPROM_MODBUS_ID, modbusId);
+      sendSerial(SERIAL_SEND_MODBUS, modbusId);
     }
   }
 }
@@ -286,17 +290,14 @@ void updateRoomTemp() {
 }
 
 void updateCircleColor() {
-  // HEATING 
   if ((roomTemperature < setTemperature) && (thermostatMode != HEATING)) {
     thermostatMode = HEATING;
     drawCircles();
   }
-  // COOLING 
   if ((roomTemperature > setTemperature) && (thermostatMode != COOLING)) {
     thermostatMode = COOLING;
     drawCircles();
   }
-  // Temperature ok 
   if ((roomTemperature == setTemperature) && (thermostatMode != TEMP_OK)) {
     thermostatMode = TEMP_OK;
     drawCircles();
@@ -304,7 +305,7 @@ void updateCircleColor() {
 }
 
 void updateModbusAddr() {
-  tft.fillRect(230, 100, 60, 45, ILI9341_BLACK);
+  tft.fillRect(230, 95, 60, 45, ILI9341_BLACK);
   tft.setTextColor(ILI9341_WHITE, ILI9341_BLACK);
   tft.setFont(&FreeSansBold24pt7b);
   tft.setCursor(235, 130);
@@ -346,7 +347,7 @@ void drawCircles() {
 }
 
 void setupSerialCommand() {
-  Serial1.begin(SERIAL_BAUDRATE);
+  Serial2.begin(SERIAL_BAUDRATE);
   strncpy(serialDelim, "~", 2);
   clearSerialBuffer();
 }
@@ -363,11 +364,11 @@ void readSerial() {
 /*  
 1
 2~0-1~18-28
-3~0-50
+3~0-509
 */ 
-  while (Serial1.available() > 0) {
+  while (Serial2.available() > 0) {
     uint8_t serialCommand;
-    inSerialChar = Serial1.read();
+    inSerialChar = Serial2.read();
     if (inSerialChar == '\n') {
       serialBufferPos = 0;
       serialToken = strtok_r(serialBuffer, serialDelim, &serialLast);
@@ -406,19 +407,19 @@ void processUpdate() {
 
   if (param != NULL) {
     power = atol(param);
-    if (power == 1) {
+    if (power == 0) {
       drawPowerOffScreen();
     } else {
       thermostatMode = BOOT;
       mode = MODE_MAIN;
       drawMainScreen();
-    }
-
-    param = serialNextParam();
-    if (param != NULL) {
+      
+      param = serialNextParam();
+      if (param != NULL) {
         setTemperature = atol(param);
         updateSetTemp();
         updateCircleColor();
+      }
     }
   }
 }
@@ -428,6 +429,9 @@ void processRoomTemp() {
   param = serialNextParam();
   if (param != NULL) {
     roomTemperature = atol(param) / 10;
+    if (power == 0) {
+      return;
+    }
     updateRoomTemp();
     updateCircleColor();
   }
@@ -440,5 +444,5 @@ char *serialNextParam() {
 void sendSerial(const char *command, int value) {
   char buf[15];
   sprintf(buf, command, value);
-  Serial1.println(buf);
+  Serial2.println(buf);
 }
