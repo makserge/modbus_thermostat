@@ -21,7 +21,7 @@ const uint16_t NTC_REFERENCE_RESISTANCE = 10000;
 const uint16_t NTC_NOMINAL_RESISTANCE = 10000;
 const uint8_t NTC_NOMINAL_TEMPERATURE = 25;
 const uint16_t NTC_B_VALUE = 3950;
-const uint16_t NTC_ADC_RESOLUTION = 1023;
+const uint16_t NTC_ADC_RESOLUTION = 4095;
 const uint8_t NTC_NUM_SAMPLES = 5;
 
 const uint8_t THERMOSTAT_ON = 0;
@@ -179,6 +179,7 @@ void initButtons() {
 void setupNTC() {
   pinMode(NTC_INT_PIN, INPUT);
   pinMode(NTC_EXT_PIN, INPUT);
+  analogReadResolution(12);
 }
 
 void setup() {
