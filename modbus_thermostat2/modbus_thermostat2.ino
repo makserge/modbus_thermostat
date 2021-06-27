@@ -1,6 +1,7 @@
 #include <ModbusSlave.h>
 #include <OneButton.h>
 #include <IWatchdog.h>
+#include <EEPROM.h>
 
 #define SLAVE_ID 50
 #define RS485_BAUDRATE 9600
@@ -30,6 +31,11 @@ const uint8_t MIN_FLOOR_TEMP = 2;
 const uint8_t MAX_FLOOR_TEMP = 3;
 const uint8_t FLOOR_TEMP = 4;
 const uint8_t AIR_TEMP = 5;
+
+const uint8_t THERMOSTAT_ON_EEPROM = 10;
+const uint8_t THERMOSTAT_TEMP_EEPROM = 20;
+const uint8_t MIN_FLOOR_TEMP_EEPROM = 30;
+const uint8_t MAX_FLOOR_TEMP_EEPROM = 40;
 
 const uint8_t PERIODICAL_TIMER_FREQUENCY = 1; //1HZ
 const uint32_t WATCHDOG_TIMEOUT = 10000000; //10s
@@ -155,6 +161,12 @@ uint8_t writeHolding(uint8_t fc, uint16_t address, uint16_t length) {
     outputState[THERMOSTAT_STATE] = LOW;
     setOutput(THERMOSTAT_OUTPUT_PIN, outputState[THERMOSTAT_STATE]);
   }
+  
+  EEPROM.put(THERMOSTAT_ON_EEPROM, holdingRegister[THERMOSTAT_ON]);
+  EEPROM.put(THERMOSTAT_TEMP_EEPROM, holdingRegister[THERMOSTAT_TEMP]);
+  EEPROM.put(MIN_FLOOR_TEMP_EEPROM, holdingRegister[MIN_FLOOR_TEMP]);
+  EEPROM.put(MAX_FLOOR_TEMP_EEPROM, holdingRegister[MAX_FLOOR_TEMP]);
+  
   return STATUS_OK;
 }
 
@@ -164,7 +176,23 @@ void clickThermostatButton() {
   if (!holdingRegister[THERMOSTAT_ON]) {
     outputState[THERMOSTAT_STATE] = LOW;
     setOutput(THERMOSTAT_OUTPUT_PIN, outputState[THERMOSTAT_STATE]);
-  }  
+  }
+  EEPROM.put(THERMOSTAT_ON_EEPROM, holdingRegister[THERMOSTAT_ON]);  
+}
+
+void loadData() {
+  EEPROM.get(THERMOSTAT_ON_EEPROM, holdingRegister[THERMOSTAT_ON]);
+  if (holdingRegister[THERMOSTAT_ON] > 1) {
+    EEPROM.put(THERMOSTAT_ON_EEPROM, 0);
+    EEPROM.put(THERMOSTAT_TEMP_EEPROM, holdingRegister[THERMOSTAT_TEMP]);
+    EEPROM.put(MIN_FLOOR_TEMP_EEPROM, holdingRegister[MIN_FLOOR_TEMP]);
+    EEPROM.put(MAX_FLOOR_TEMP_EEPROM, holdingRegister[MAX_FLOOR_TEMP]);
+  }
+
+  EEPROM.get(THERMOSTAT_ON_EEPROM, holdingRegister[THERMOSTAT_ON]);
+  EEPROM.get(THERMOSTAT_TEMP_EEPROM, holdingRegister[THERMOSTAT_TEMP]);
+  EEPROM.get(MIN_FLOOR_TEMP_EEPROM, holdingRegister[MIN_FLOOR_TEMP]);
+  EEPROM.get(MAX_FLOOR_TEMP_EEPROM, holdingRegister[MAX_FLOOR_TEMP]);
 }
 
 void initButtons() {
@@ -183,6 +211,7 @@ void setupNTC() {
 }
 
 void setup() {
+  loadData();
   initButtons();
   setupNTC();
   
