@@ -55,8 +55,9 @@ Modbus slave(SLAVE_ID, RS485_TX_ENABLE_PIN);
 OneButton thermostatButton(THERMOSTAT_ON_PIN, true, false);
 
 uint8_t readDigitalOut(uint8_t fc, uint16_t address, uint16_t length) {
-  slave.writeCoilToBuffer(THERMOSTAT_STATE, outputState[THERMOSTAT_STATE]);
-  slave.writeCoilToBuffer(EXTRA_OUT_STATE, outputState[EXTRA_OUT_STATE]);
+  for (int i = 0; i < length; i++) {
+    slave.writeCoilToBuffer(i, outputState[i + address]);
+  }
   return STATUS_OK;
 }
 
@@ -138,9 +139,10 @@ void updateSensors() {
  * Handle Read Holding Registers (FC=03)
  */
 uint8_t readHolding(uint8_t fc, uint16_t address, uint16_t length) {
-  for (uint16_t i = 0; i < HOLDING_COUNT; i++) {
-    slave.writeRegisterToBuffer(i, holdingRegister[i]);
+  for (uint16_t i = 0; i < length; i++) {
+    slave.writeRegisterToBuffer(i, holdingRegister[i + address]);
   }
+  
   return STATUS_OK;
 }
 
