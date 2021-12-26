@@ -202,6 +202,8 @@ void initButtons() {
   pinMode(EXTRA_OUTPUT_PIN, OUTPUT);
   pinMode(THERMOSTAT_LED_PIN, OUTPUT);
   pinMode(THERMOSTAT_OUTPUT_PIN, OUTPUT);
+  
+  setOutput(THERMOSTAT_LED_PIN, holdingRegister[THERMOSTAT_ON]);
 
   thermostatButton.attachClick(clickThermostatButton);
 }
